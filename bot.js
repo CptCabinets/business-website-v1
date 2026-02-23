@@ -1,6 +1,5 @@
 const TelegramBot = require('node-telegram-bot-api');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const OpenAI = require('openai');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
@@ -11,9 +10,8 @@ const API_BASE = 'http://localhost:3000/api';
 
 const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
 console.log('🤖 AJ Cleaning Services Bot starting...');
 
@@ -65,30 +63,29 @@ function formatBooking(b) {
     `💰 €${b.price || 0} | Status: ${b.status || 'confirmed'}`;
 }
 
-// ─── Voice Transcription ─────────────────────────────────────────────────────
+// ─── Voice Transcription (via Gemini multimodal) ─────────────────────────────
 
 async function transcribeVoice(fileId) {
   const fileInfo = await bot.getFile(fileId);
   const fileUrl = `https://api.telegram.org/file/bot${TELEGRAM_TOKEN}/${fileInfo.file_path}`;
 
-  const tmpPath = path.join(os.tmpdir(), `voice_${Date.now()}.ogg`);
-  const response = await axios({ url: fileUrl, method: 'GET', responseType: 'stream' });
-  const writer = fs.createWriteStream(tmpPath);
+  // Download audio file to buffer
+  const response = await axios({ url: fileUrl, method: 'GET', responseType: 'arraybuffer' });
+  const audioBuffer = Buffer.from(response.data);
+  const base64Audio = audioBuffer.toString('base64');
 
-  await new Promise((resolve, reject) => {
-    response.data.pipe(writer);
-    writer.on('finish', resolve);
-    writer.on('error', reject);
-  });
+  // Use Gemini multimodal to transcribe
+  const result = await model.generateContent([
+    {
+      inlineData: {
+        mimeType: 'audio/ogg',
+        data: base64Audio,
+      },
+    },
+    'Transcribe exactly what is said in this audio. Return only the spoken words, nothing else.',
+  ]);
 
-  const transcription = await openai.audio.transcriptions.create({
-    file: fs.createReadStream(tmpPath),
-    model: 'whisper-1',
-    language: 'en',
-  });
-
-  fs.unlink(tmpPath, () => {});
-  return transcription.text;
+  return result.response.text().trim();
 }
 
 // ─── AI Intent Parser ────────────────────────────────────────────────────────
