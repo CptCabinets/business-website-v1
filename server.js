@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const crypto = require('crypto');
 const db = require('./db');
 
 const app = express();
@@ -11,6 +12,69 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 app.use(express.static('.'));  // Also serve root (index.html, css/, assets/)
+
+// ── Simple token auth ──────────────────────────────────────────────────────
+// Tokens are stored in memory (restart invalidates them — that's fine for now)
+const activeSessions = new Map(); // token → { username, expires }
+const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
+
+// Staff accounts — stored in env vars:
+//   STAFF_USERS=alice:password123,bob:secret
+// Default fallback (change in .env!)
+function getStaffAccounts() {
+  const raw = process.env.STAFF_USERS || '';
+  const accounts = {};
+  raw.split(',').forEach(pair => {
+    const [u, p] = pair.trim().split(':');
+    if (u && p) accounts[u.toLowerCase()] = p;
+  });
+  return accounts;
+}
+
+function authMiddleware(req, res, next) {
+  const header = req.headers['authorization'] || '';
+  const token = header.replace('Bearer ', '').trim();
+  const session = activeSessions.get(token);
+  if (!session || session.expires < Date.now()) {
+    return res.status(401).json({ error: 'Unauthorised' });
+  }
+  req.user = session.username;
+  next();
+}
+
+// === AUTH API ===
+
+app.post('/api/auth/login', (req, res) => {
+  const { username, password } = req.body || {};
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Username and password required' });
+  }
+  const accounts = getStaffAccounts();
+  const stored = accounts[username.toLowerCase()];
+  if (!stored || stored !== password) {
+    return res.status(401).json({ error: 'Invalid username or password' });
+  }
+  const token = crypto.randomBytes(32).toString('hex');
+  activeSessions.set(token, { username, expires: Date.now() + SESSION_TTL_MS });
+  res.json({ token, username });
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  const header = req.headers['authorization'] || '';
+  const token = header.replace('Bearer ', '').trim();
+  activeSessions.delete(token);
+  res.json({ ok: true });
+});
+
+// Serve login page
+app.get('/login', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+// Serve schedule page (auth enforced client-side; API calls require token)
+app.get('/schedule', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'schedule.html'));
+});
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -31,7 +95,7 @@ app.get('/api/cleaners', (req, res) => {
 
 // === BOOKING TYPES API ===
 
-app.get('/api/booking-types', (req, res) => {
+app.get('/api/booking-types', authMiddleware, (req, res) => {
   try {
     const types = db.prepare('SELECT * FROM booking_types ORDER BY id').all();
     res.json(types);
@@ -43,16 +107,18 @@ app.get('/api/booking-types', (req, res) => {
 // === BOOKINGS API ===
 
 // Get bookings with optional date range
-app.get('/api/bookings', (req, res) => {
+app.get('/api/bookings', authMiddleware, (req, res) => {
   try {
     const { start_date, end_date } = req.query;
     let query = `
       SELECT 
         b.*,
-        GROUP_CONCAT(c.name, ', ') as assigned_cleaners
+        GROUP_CONCAT(c.name, ', ') as assigned_cleaners,
+        bt.name as booking_type_name
       FROM bookings b
       LEFT JOIN booking_cleaners bc ON b.id = bc.booking_id
       LEFT JOIN cleaners c ON bc.cleaner_id = c.id
+      LEFT JOIN booking_types bt ON b.booking_type_id = bt.id
     `;
     const params = [];
     
@@ -77,7 +143,7 @@ app.get('/api/bookings', (req, res) => {
 });
 
 // Get single booking
-app.get('/api/bookings/:id', (req, res) => {
+app.get('/api/bookings/:id', authMiddleware, (req, res) => {
   try {
     const booking = db.prepare('SELECT * FROM bookings WHERE id = ?').get(req.params.id);
     if (!booking) {
@@ -100,7 +166,7 @@ app.get('/api/bookings/:id', (req, res) => {
 });
 
 // Create new booking
-app.post('/api/bookings', (req, res) => {
+app.post('/api/bookings', authMiddleware, (req, res) => {
   try {
     const {
       customer_name,
@@ -150,7 +216,7 @@ app.post('/api/bookings', (req, res) => {
 });
 
 // Update booking
-app.put('/api/bookings/:id', (req, res) => {
+app.put('/api/bookings/:id', authMiddleware, (req, res) => {
   try {
     const {
       customer_name,
@@ -201,7 +267,7 @@ app.put('/api/bookings/:id', (req, res) => {
 });
 
 // Delete booking
-app.delete('/api/bookings/:id', (req, res) => {
+app.delete('/api/bookings/:id', authMiddleware, (req, res) => {
   try {
     db.prepare('DELETE FROM bookings WHERE id = ?').run(req.params.id);
     res.json({ message: 'Booking deleted successfully' });
@@ -213,7 +279,7 @@ app.delete('/api/bookings/:id', (req, res) => {
 // === SCHEDULE API ===
 
 // Get weekly schedule
-app.get('/api/schedule/week/:date', (req, res) => {
+app.get('/api/schedule/week/:date', authMiddleware, (req, res) => {
   try {
     const { date } = req.params;
     const startOfWeek = new Date(date);
@@ -252,7 +318,7 @@ app.get('/api/schedule/week/:date', (req, res) => {
 // === INCOME API ===
 
 // Get weekly income
-app.get('/api/income/weekly/:date', (req, res) => {
+app.get('/api/income/weekly/:date', authMiddleware, (req, res) => {
   try {
     const { date } = req.params;
     const startOfWeek = new Date(date);

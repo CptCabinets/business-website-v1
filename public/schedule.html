@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Schedule · AJ Cleaning Services</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .status-confirmed { background: #dcfce7; color: #16a34a; }
+        .status-pending    { background: #fef9c3; color: #ca8a04; }
+        .status-cancelled  { background: #fee2e2; color: #dc2626; }
+        .status-completed  { background: #e0e7ff; color: #4f46e5; }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+    <!-- Nav -->
+    <nav class="bg-white border-b border-slate-100 shadow-sm sticky top-0 z-50">
+        <div class="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+                <span class="text-xl">🧹</span>
+                <span class="font-bold text-slate-800">AJ Cleaning</span>
+                <span class="text-slate-300 mx-1">·</span>
+                <span class="text-slate-500 text-sm">Schedule</span>
+            </div>
+            <div class="flex items-center gap-3">
+                <span id="user-display" class="text-sm text-slate-500 hidden md:block"></span>
+                <button onclick="logout()" class="text-sm text-slate-500 hover:text-red-500 transition-colors px-3 py-1.5 rounded-lg hover:bg-red-50">
+                    Sign Out
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="max-w-5xl mx-auto px-4 py-8">
+
+        <!-- Week Navigation -->
+        <div class="flex items-center justify-between mb-8">
+            <div>
+                <h1 class="text-2xl font-bold text-slate-800">Weekly Schedule</h1>
+                <p id="week-label" class="text-slate-500 text-sm mt-0.5"></p>
+            </div>
+            <div class="flex items-center gap-2">
+                <button onclick="prevWeek()" class="px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-sm font-medium hover:bg-slate-50 transition-colors shadow-sm">
+                    ← Prev
+                </button>
+                <button onclick="goToday()" class="px-4 py-2 bg-sky-600 text-white rounded-xl text-sm font-medium hover:bg-sky-700 transition-colors shadow-sm">
+                    Today
+                </button>
+                <button onclick="nextWeek()" class="px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-sm font-medium hover:bg-slate-50 transition-colors shadow-sm">
+                    Next →
+                </button>
+            </div>
+        </div>
+
+        <!-- Summary Cards -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8" id="summary-cards">
+            <div class="bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
+                <div class="text-2xl font-bold text-slate-800" id="stat-bookings">–</div>
+                <div class="text-xs text-slate-400 mt-0.5">Bookings</div>
+            </div>
+            <div class="bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
+                <div class="text-2xl font-bold text-slate-800" id="stat-hours">–</div>
+                <div class="text-xs text-slate-400 mt-0.5">Total Hours</div>
+            </div>
+            <div class="bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
+                <div class="text-2xl font-bold text-emerald-600" id="stat-income">–</div>
+                <div class="text-xs text-slate-400 mt-0.5">Est. Income</div>
+            </div>
+            <div class="bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
+                <div class="text-2xl font-bold text-slate-800" id="stat-cleaners">–</div>
+                <div class="text-xs text-slate-400 mt-0.5">Cleaners Active</div>
+            </div>
+        </div>
+
+        <!-- Day-by-day view -->
+        <div id="schedule-container">
+            <div class="text-center py-16 text-slate-400">
+                <div class="text-4xl mb-3">⏳</div>
+                Loading schedule...
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ── Auth ──────────────────────────────────────────────────────────────
+        const token = localStorage.getItem('aj_token');
+        if (!token) window.location.href = '/login';
+
+        const username = localStorage.getItem('aj_user') || '';
+        const userDisplay = document.getElementById('user-display');
+        if (userDisplay) userDisplay.textContent = `Hello, ${username}`;
+
+        function logout() {
+            localStorage.removeItem('aj_token');
+            localStorage.removeItem('aj_user');
+            window.location.href = '/login';
+        }
+
+        async function apiFetch(url) {
+            const res = await fetch(url, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (res.status === 401) { logout(); return null; }
+            return res.json();
+        }
+
+        // ── Week state ────────────────────────────────────────────────────────
+        let currentMonday = getMonday(new Date());
+
+        function getMonday(d) {
+            const dt = new Date(d);
+            const day = dt.getDay();
+            const diff = dt.getDate() - day + (day === 0 ? -6 : 1);
+            dt.setDate(diff);
+            dt.setHours(0,0,0,0);
+            return dt;
+        }
+
+        function toISO(d) { return d.toISOString().split('T')[0]; }
+
+        function formatDate(iso) {
+            const d = new Date(iso + 'T12:00:00');
+            return d.toLocaleDateString('en-IE', { weekday: 'long', day: 'numeric', month: 'short' });
+        }
+
+        function formatShort(iso) {
+            const d = new Date(iso + 'T12:00:00');
+            return d.toLocaleDateString('en-IE', { weekday: 'short', day: 'numeric', month: 'short' });
+        }
+
+        function prevWeek() { currentMonday.setDate(currentMonday.getDate() - 7); loadWeek(); }
+        function nextWeek() { currentMonday.setDate(currentMonday.getDate() + 7); loadWeek(); }
+        function goToday()  { currentMonday = getMonday(new Date()); loadWeek(); }
+
+        // ── Booking type colour map ───────────────────────────────────────────
+        const typeColors = {
+            'General Cleaning':             'border-sky-300 bg-sky-50',
+            'Deep Clean':                   'border-violet-300 bg-violet-50',
+            'End of Tenancy / New Build':   'border-emerald-300 bg-emerald-50',
+            'Oven Clean':                   'border-amber-300 bg-amber-50',
+        };
+        const typeBadgeColors = {
+            'General Cleaning':             'bg-sky-100 text-sky-700',
+            'Deep Clean':                   'bg-violet-100 text-violet-700',
+            'End of Tenancy / New Build':   'bg-emerald-100 text-emerald-700',
+            'Oven Clean':                   'bg-amber-100 text-amber-700',
+        };
+
+        // ── Load & render ─────────────────────────────────────────────────────
+        async function loadWeek() {
+            const monday = new Date(currentMonday);
+            const sunday = new Date(monday);
+            sunday.setDate(sunday.getDate() + 6);
+
+            const mondayISO = toISO(monday);
+            const sundayISO = toISO(sunday);
+
+            document.getElementById('week-label').textContent =
+                `${formatShort(mondayISO)} – ${formatShort(sundayISO)}`;
+
+            document.getElementById('schedule-container').innerHTML = `
+                <div class="text-center py-16 text-slate-400">
+                    <div class="text-4xl mb-3">⏳</div>Loading…
+                </div>`;
+
+            const [bookingsData, incomeData] = await Promise.all([
+                apiFetch(`/api/bookings?start_date=${mondayISO}&end_date=${sundayISO}`),
+                apiFetch(`/api/income/weekly/${mondayISO}`)
+            ]);
+
+            if (!bookingsData) return;
+
+            // Update summary
+            const cleanerSet = new Set();
+            (bookingsData || []).forEach(b => {
+                if (b.assigned_cleaners) b.assigned_cleaners.split(', ').forEach(c => cleanerSet.add(c));
+            });
+            document.getElementById('stat-bookings').textContent = bookingsData.length;
+            document.getElementById('stat-hours').textContent = (incomeData?.total_hours || 0) + 'h';
+            document.getElementById('stat-income').textContent = '€' + ((incomeData?.total_income || 0)).toFixed(0);
+            document.getElementById('stat-cleaners').textContent = cleanerSet.size || 0;
+
+            // Group by day
+            const days = {};
+            for (let i = 0; i < 7; i++) {
+                const d = new Date(monday);
+                d.setDate(d.getDate() + i);
+                days[toISO(d)] = [];
+            }
+            (bookingsData || []).forEach(b => {
+                if (days[b.booking_date] !== undefined) days[b.booking_date].push(b);
+            });
+
+            const todayISO = toISO(new Date());
+
+            let html = '<div class="space-y-4">';
+            for (const [dateISO, bookings] of Object.entries(days)) {
+                const isToday = dateISO === todayISO;
+                const isPast = dateISO < todayISO;
+                const dayLabel = formatDate(dateISO);
+
+                html += `
+                <div class="bg-white rounded-2xl border ${isToday ? 'border-sky-400 ring-2 ring-sky-100' : 'border-slate-100'} shadow-sm overflow-hidden">
+                    <div class="px-5 py-3 flex items-center justify-between ${isToday ? 'bg-sky-50' : isPast ? 'bg-slate-50' : 'bg-white'} border-b ${isToday ? 'border-sky-200' : 'border-slate-100'}">
+                        <div class="flex items-center gap-3">
+                            <span class="font-semibold ${isToday ? 'text-sky-700' : isPast ? 'text-slate-400' : 'text-slate-700'}">${dayLabel}</span>
+                            ${isToday ? '<span class="text-xs bg-sky-600 text-white px-2 py-0.5 rounded-full font-medium">Today</span>' : ''}
+                        </div>
+                        <span class="text-sm ${bookings.length ? 'text-slate-600 font-medium' : 'text-slate-300'}">${bookings.length} booking${bookings.length !== 1 ? 's' : ''}</span>
+                    </div>`;
+
+                if (bookings.length === 0) {
+                    html += `<div class="px-5 py-5 text-slate-300 text-sm italic">No bookings</div>`;
+                } else {
+                    html += `<div class="divide-y divide-slate-50">`;
+                    for (const b of bookings) {
+                        const typeColor = typeColors[b.booking_type_name] || 'border-slate-200 bg-white';
+                        const badgeColor = typeBadgeColors[b.booking_type_name] || 'bg-slate-100 text-slate-600';
+                        const statusClass = `status-${b.status || 'confirmed'}`;
+                        html += `
+                        <div class="px-5 py-4 border-l-4 ${typeColor} hover:bg-slate-50 transition-colors">
+                            <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-2">
+                                <div class="flex-1 min-w-0">
+                                    <div class="flex items-center gap-2 flex-wrap">
+                                        <span class="font-semibold text-slate-800">${escHtml(b.customer_name)}</span>
+                                        <span class="text-xs px-2 py-0.5 rounded-full font-medium ${statusClass}">${b.status || 'confirmed'}</span>
+                                        ${b.booking_type_name ? `<span class="text-xs px-2 py-0.5 rounded-full font-medium ${badgeColor}">${escHtml(b.booking_type_name)}</span>` : ''}
+                                    </div>
+                                    <div class="text-sm text-slate-500 mt-1 truncate">🏠 ${escHtml(b.address)}</div>
+                                    <div class="flex flex-wrap gap-3 mt-2 text-sm text-slate-600">
+                                        <span>🕐 ${b.start_time || 'TBD'}</span>
+                                        <span>⏱ ${b.duration_hours}h</span>
+                                        <span>👷 ${escHtml(b.assigned_cleaners || 'Unassigned')}</span>
+                                    </div>
+                                    ${b.notes ? `<div class="text-xs text-slate-400 mt-1.5 italic">📝 ${escHtml(b.notes)}</div>` : ''}
+                                </div>
+                                <div class="text-right shrink-0">
+                                    <div class="text-xl font-bold text-emerald-600">€${(b.price || 0).toFixed(0)}</div>
+                                    <div class="text-xs text-slate-400">${b.num_cleaners || 1} cleaner${(b.num_cleaners || 1) !== 1 ? 's' : ''}</div>
+                                </div>
+                            </div>
+                        </div>`;
+                    }
+                    html += `</div>`;
+                }
+
+                html += `</div>`;
+            }
+            html += '</div>';
+            document.getElementById('schedule-container').innerHTML = html;
+        }
+
+        function escHtml(str) {
+            return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+
+        loadWeek();
+    </script>
+</body>
+</html>
