@@ -1,2 +1,5 @@
-node_modules/\n.env\ndata/*.db
+node_modules/
+.env
+data/*.db
+data/media/
 .DS_Store

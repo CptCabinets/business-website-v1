@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -23,6 +24,17 @@ app.get('/api/cleaners', (req, res) => {
   try {
     const cleaners = db.prepare('SELECT * FROM cleaners ORDER BY name').all();
     res.json(cleaners);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// === BOOKING TYPES API ===
+
+app.get('/api/booking-types', (req, res) => {
+  try {
+    const types = db.prepare('SELECT * FROM booking_types ORDER BY id').all();
+    res.json(types);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
